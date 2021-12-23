@@ -1,12 +1,18 @@
 const { Command } = require('discord-akairo');
 const Discord = require('discord.js');
 const db = require('../Data/database');
+const fs = require('fs');
 
-class AchievementHandler extends Command {
+class UserHandler extends Command {
     constructor() {
-        super('hf', {
-            aliases: ['hf'],
+        super('user', {
+            aliases: ['user'],
             args: [
+                {
+                    id: "type",
+                    type: "string",
+                    default: "Erreur"
+                },
                 {
                     id: 'option',
                     type: 'string',
@@ -19,43 +25,49 @@ class AchievementHandler extends Command {
                     flag: 'id:'
                 },
                 {
-                    id:"achievement",
-                    type: "string",
-                    default: "Erreur"
-                },
-                {
                     id: "desc",
                     type: "string",
                     default: "Pas de description"
                 },
-                ],
+            ],
             userPermissions: ['ADMINISTRATOR'],
         });
     }
 
-    create(message, args) {
-        const user = message.mentions.users.first() || message.author;
-        const hf = new Discord.MessageEmbed()
+    achievement(user, message, args) {
+
+        if(args.option === "add") {
+            db.execute("INSERT INTO users (name, leader_tag, description, created_by_tag, created_by_id, created_at)" +
+                "VALUES (?, ?, ?, ?, ?)", [args.serment, user, args.desc, user.tag, user.id, message.createdAt]).then();
+
+        }
+
+        const serment = new Discord.MessageEmbed()
             .setColor(3582805)
-            .setTitle('Haut fait crée : ' + args.achievement + '\t\t')
+            .setTitle('Serment crée : ' + args.serment + '\t\t')
             .setDescription(args.desc)
             .setFooter(`${user.username}`, `${user.avatarURL()}`)
             .setTimestamp();
 
-        db.execute(
-            "INSERT INTO achievements (achievement, description, created_by_tag, created_by_id, created_at)" + "VALUES (?, ?, ?, ?, ?)",
-            [args.achievement, args.desc, user.tag, user.id, message.createdAt]).then();
+        db.execute("INSERT INTO serments (name, leader_tag, description, created_by_tag, created_by_id, created_at)" +
+            "VALUES (?, ?, ?, ?, ?)", [args.serment, user, args.desc, user.tag, user.id, message.createdAt]).then();
 
-        return message.reply(hf);
+        return message.reply(serment);
     }
 
-    list(message) {
-        const user = message.mentions.users.first() || message.author;
+    attachement(user, message, args) {
+        message.attachments.forEach(a => {
+            if (a.name === "logo") fs.writeFileSync(`./src/Data/img/${args.serment}/${a.name}`, a.file);
+            if (a.name === "footer") fs.writeFileSync(`./src/Data/img/${args.serment}/${a.name}`, a.file);
+        })
+    }
+
+    list(user, message) {
         let hfList = "";
 
         db.execute("SELECT achievement, description FROM achievements").then(res => {
             for (let i = 0; i < res[0].length; i++) {
-               hfList += i+1 + ". " + res[0][i].achievement + ": " + res[0][i].description + '\n';
+                hfList += i + 1 + ". " + res[0][i].achievement + ": " + res[0][i].description + '\n';
             }
 
             const hf = new Discord.MessageEmbed()
@@ -68,8 +80,7 @@ class AchievementHandler extends Command {
         });
     }
 
-    async update(message, args) {
-        const user = message.mentions.users.first() || message.author;
+    async update(user, message, args) {
         let hfList = "";
 
         let [[res]] = await db.execute("SELECT achievement, description FROM achievements WHERE id=?", [args.id])
@@ -77,8 +88,8 @@ class AchievementHandler extends Command {
         let achievement = args.achievement || res.achievement;
         let description = args.desc || res.description;
 
-        if(description === "Pas de description") description = res.description;
-        if(achievement === "Error") achievement = res.achievement;
+        if (description === "Pas de description") description = res.description;
+        if (achievement === "Error") achievement = res.achievement;
 
         await db.execute(
             "UPDATE achievements SET achievement=?, description=?, modified_by_tag=?, modified_by_id=?, modified_at=? WHERE id=?",
@@ -95,8 +106,7 @@ class AchievementHandler extends Command {
         return message.reply(hf);
     }
 
-    delete(message, args) {
-        const user = message.mentions.users.first() || message.author;
+    delete(user, message, args) {
         let hfList = "";
 
         db.execute("SELECT achievement, description FROM achievements").then(res => {
@@ -112,14 +122,25 @@ class AchievementHandler extends Command {
         });
     }
 
-    exec(message, args) {
+    async exec(message, args) {
         //if (!message.member.roles.cache.some(role => role.id == 229291397931466752 || 468519516494757918)) return message.reply("Tu n\'a pas la permission de faire ça.");
-        if (args.option === "create") this.create(message, args);
-        if (args.option === "list") this.list(message);
-        if (args.option === "update") this.update(message, args);
-        if (args.option === "delete") this.delete(message, args);
+        const user = message.mentions.users.first() || message.author;
+        let isCreated = await db.execute("SELECT user_tag FROM users WHERE user_tag=?", [user.tag]).then(res => {
+            return res;
+        });
+
+        if (isCreated[0][0] === undefined) {
+            db.execute("INSERT INTO users (user_tag, created_by_tag, created_by_id, created_at)" + "VALUES (?, ?, ?, ?)",
+                [user.tag, message.author.tag, message.author.id, message.createdAt]).then(console.log);
+        }
+
+        if (args.type === "achievement") this.achievement(user, message, args);
+        if (args.type === "attachement") this.attachement(user, message, args);
+        if (args.type === "list") this.list(user, message);
+        if (args.type === "update") this.update(user, message, args);
+        if (args.type === "delete") this.delete(user, message, args);
 
     }
 }
 
-module.exports = AchievementHandler;
+module.exports = UserHandler;
