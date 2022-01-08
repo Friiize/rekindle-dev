@@ -11,12 +11,13 @@ class UserHandler extends Command {
                 {
                     id: "type",
                     type: "string",
-                    default: "Erreur"
+                    default: "show"
                 },
                 {
-                    id: 'option',
-                    type: 'string',
-                    default: "list"
+                    id: "achievement",
+                    type: "string",
+                    match: 'option',
+                    flag: 'achievement:'
                 },
                 {
                     id: "id",
@@ -24,35 +25,37 @@ class UserHandler extends Command {
                     match: 'option',
                     flag: 'id:'
                 },
-                {
-                    id: "desc",
-                    type: "string",
-                    default: "Pas de description"
-                },
             ],
             userPermissions: ['ADMINISTRATOR'],
         });
     }
 
-    achievement(user, message, args) {
+    async achievement(user, message, args) {
+        let [[res]] = await db.execute("SELECT achievements.id FROM achievements WHERE id=?", [args.id]); //Cherche l'id de l'achievement
+        let errMsg = "ajouté avec succès.";
+        console.log(args)
+        console.log(res)
 
-        if(args.option === "add") {
-            db.execute("INSERT INTO users (name, leader_tag, description, created_by_tag, created_by_id, created_at)" +
-                "VALUES (?, ?, ?, ?, ?)", [args.serment, user, args.desc, user.tag, user.id, message.createdAt]).then();
-
+        if (res && args.achievement === "add")  {
+            await db.execute(
+                "INSERT INTO user_achievement SET user_id=?, achievement_id=?, obtained_at=?",
+                [user.id, res.id, message.createdAt]);
+            await db.execute(
+                "UPDATE users SET modified_by_tag=?, modified_by_id=?, modified_at=? WHERE id=?",
+                [message.author.tag, message.author.id, message.createdAt, user.id]);
+            errMsg = "ajouté avec succès.";
+        } else if (res && args.achievement === "delete") {
+            db.execute(
+                "DELETE FROM user_achievement WHERE achievement_id=?",
+                [args.id]);
+            await db.execute(
+                "UPDATE users SET modified_by_tag=?, modified_by_id=?, modified_at=? WHERE id=?",
+                [message.author.tag, message.author.id, message.createdAt, user.id]);
+            errMsg = "supprimé avec succès.";
+        } else {
+            errMsg = "le haut fait n'existe pas.";
         }
-
-        const serment = new Discord.MessageEmbed()
-            .setColor(3582805)
-            .setTitle('Serment crée : ' + args.serment + '\t\t')
-            .setDescription(args.desc)
-            .setFooter(`${user.username}`, `${user.avatarURL()}`)
-            .setTimestamp();
-
-        db.execute("INSERT INTO serments (name, leader_tag, description, created_by_tag, created_by_id, created_at)" +
-            "VALUES (?, ?, ?, ?, ?)", [args.serment, user, args.desc, user.tag, user.id, message.createdAt]).then();
-
-        return message.reply(serment);
+        return message.reply(errMsg);
     }
 
     attachement(user, message, args) {
@@ -60,24 +63,6 @@ class UserHandler extends Command {
             if (a.name === "logo") fs.writeFileSync(`./src/Data/img/${args.serment}/${a.name}`, a.file);
             if (a.name === "footer") fs.writeFileSync(`./src/Data/img/${args.serment}/${a.name}`, a.file);
         })
-    }
-
-    list(user, message) {
-        let hfList = "";
-
-        db.execute("SELECT achievement, description FROM achievements").then(res => {
-            for (let i = 0; i < res[0].length; i++) {
-                hfList += i + 1 + ". " + res[0][i].achievement + ": " + res[0][i].description + '\n';
-            }
-
-            const hf = new Discord.MessageEmbed()
-                .setColor(3582805)
-                .setTitle('Hauts faits : \t\t')
-                .setDescription(hfList)
-                .setFooter(`${user.username}`, `${user.avatarURL()}`)
-                .setTimestamp();
-            return message.reply(hf);
-        });
     }
 
     async update(user, message, args) {
@@ -101,44 +86,115 @@ class UserHandler extends Command {
             .setColor(3582805)
             .setTitle('Haut fait modifié : \t\t')
             .setDescription(hfList)
-            .setFooter(`${user.username}`, `${user.avatarURL()}`)
+            .setFooter(`${message.author.username}`, `${message.author.avatarURL()}`)
             .setTimestamp();
         return message.reply(hf);
     }
 
-    delete(user, message, args) {
+    async delete(user, message) {
         let hfList = "";
+        let rpNames = "";
+        let rpSerments = "";
+        let rpGames = "";
+        let [res] = await db.execute("SELECT * FROM user_achievement ua LEFT JOIN achievements a ON ua.achievement_id = a.id WHERE ua.user_id=? GROUP BY obtained_at DESC", [user.id]);
+        let count = (res.length <= 5) ? res.length : 5;
 
-        db.execute("SELECT achievement, description FROM achievements").then(res => {
-            hfList += args.id + ". " + res[0][args.id].achievement + ": " + res[0][args.id].description
-            const hf = new Discord.MessageEmbed()
-                .setColor(3582805)
-                .setTitle('Haut fait supprimé : \t\t')
-                .setDescription(hfList)
-                .setFooter(`${user.username}`, `${user.avatarURL()}`)
-                .setTimestamp();
-            db.execute("DELETE FROM achievements WHERE id=?", [args.id]).then();
-            return message.reply(hf);
-        });
+        for (let i = 0; i < count; i++) {
+            hfList += "**"+res[i].id + ". " + res[i].achievement + "**\n " + res[i].description + ' \n';
+        }
+
+        [res] = await db.execute("SELECT c.rp_name, c.rp_firstname, c.rp_surname, c.rp_age, c.rp_title, c.rp_class, c.assigned_game, s.name FROM rp_characters c LEFT JOIN serments s ON s.id = c.serment_id WHERE c.user_tag=? GROUP BY c.created_at DESC" , [user.tag]);
+
+        count = (res.length <= 7) ? res.length : 7;
+
+        for (let i = 0; i < count; i++) {
+            rpNames += res[i].rp_name + " " + res[i].rp_firstname + ", " + res[i].rp_surname + "\n";
+            rpSerments += (res[i].name === null) ? "Pas de serments\n" : res[i].name + "\n";
+            rpGames += res[i].assigned_game + "\n";
+        }
+
+        const userE = new Discord.MessageEmbed()
+            .setColor(3582805)
+            .setThumbnail(user.avatarURL())
+            .setAuthor(user.tag + ' - Supprimé')
+            .addField(`Hauts faits`, `${hfList}`, false)
+            .addField(`Personnages`, `${rpNames}`, true)
+            .addField(`Serments`, `${rpSerments}`, true)
+            .addField(`Jeux`, `${rpGames}`, true)
+            .setFooter(`${message.author.username}`, `${message.author.avatarURL()}`)
+            .setTimestamp();
+        await db.execute("DELETE FROM users WHERE user_id=?", [user.id]);
+        await db.execute("DELETE FROM rp_characters WHERE user_tag=?", [user.tag]);
+        await db.execute("DELETE FROM serments WHERE leader_id=?", [user.id]);
+        return message.reply(userE);
+    }
+
+    async profile(user, message) {
+        let [[res]] = await db.execute("SELECT user_tag FROM users WHERE user_tag=?" , [user.tag]);
+        let hfList = "";
+        let rpNames = "";
+        let rpSerments = "";
+        let rpGames = "";
+
+        //console.log(user.tag);
+        if (res === undefined) {
+            db.execute("INSERT INTO users (user_id, user_tag, created_by_tag, created_by_id, created_at)" + "VALUES (?, ?, ?, ?, ?)",
+                [user.id, user.tag, message.author.tag, message.author.id, message.createdAt]);
+        }
+
+        [res] = await db.execute("SELECT * FROM user_achievement ua LEFT JOIN achievements a ON ua.achievement_id = a.id WHERE ua.user_id=? GROUP BY obtained_at DESC", [user.id]);
+
+        let count = (res.length <= 5) ? res.length : 5;
+        if (count !== 0) {
+            for (let i = 0; i < count; i++) {
+                hfList += "**"+res[i].id + ". " + res[i].achievement + "**\n " + res[i].description + ' \n';
+            }
+        } else {
+            hfList = '(Vide)';
+        }
+
+        let [res2] = await db.execute("SELECT c.rp_name, c.rp_firstname, c.rp_surname, c.assigned_game, s.name FROM rp_characters c LEFT JOIN serments s ON s.id = c.serment_id WHERE c.user_tag=? GROUP BY c.created_at DESC" , [user.tag]);
+        //console.log(res2)
+        count = (res2.length <= 7) ? res2.length : 7;
+        //console.log(count)
+        //console.log(res.length)
+        if (count !== 0) {
+            for (let i = 0; i < count; i++) {
+                rpNames += res2[i].rp_name + " " + res2[i].rp_firstname + ", " + res2[i].rp_surname + "\n";
+                rpSerments += (res2[i].name === null) ? "Pas de serments\n" : res2[i].name + "\n";
+                rpGames += res2[i].assigned_game + "\n";
+            }
+        } else {
+            rpNames = '(Vide)';
+            rpSerments = '(Vide)';
+            rpGames = '(Vide)';
+        }
+        //console.log(rpNames);
+        //console.log(rpSerments);
+        //console.log(rpGames);
+        const userE = new Discord.MessageEmbed()
+            .setColor(3582805)
+            .setThumbnail(user.avatarURL())
+            .setAuthor(user.tag)
+            .addField(`Hauts faits`, `${hfList}`, false)
+            .addField(`Personnages`, `${rpNames}`, true)
+            .addField(`Serments`, `${rpSerments}`, true)
+            .addField(`Jeux`, `${rpGames}`, true)
+            .setFooter(`${message.author.username}`, `${message.author.avatarURL()}`)
+            .setTimestamp();
+        return message.reply(userE);
     }
 
     async exec(message, args) {
         //if (!message.member.roles.cache.some(role => role.id == 229291397931466752 || 468519516494757918)) return message.reply("Tu n\'a pas la permission de faire ça.");
         const user = message.mentions.users.first() || message.author;
-        let isCreated = await db.execute("SELECT user_tag FROM users WHERE user_tag=?", [user.tag]).then(res => {
-            return res;
-        });
 
-        if (isCreated[0][0] === undefined) {
-            db.execute("INSERT INTO users (user_tag, created_by_tag, created_by_id, created_at)" + "VALUES (?, ?, ?, ?)",
-                [user.tag, message.author.tag, message.author.id, message.createdAt]).then(console.log);
-        }
-
-        if (args.type === "achievement") this.achievement(user, message, args);
+        if (args.type === "") this.achievement(user, message, args);
         if (args.type === "attachement") this.attachement(user, message, args);
-        if (args.type === "list") this.list(user, message);
+        if (args.achievement === "delete" || args.achievement === "add") this.achievement(user, message, args);
         if (args.type === "update") this.update(user, message, args);
         if (args.type === "delete") this.delete(user, message, args);
+        if (args.type === "profile" || args.type === user) this.profile(user, message);
 
     }
 }
